@@ -1,6 +1,7 @@
 ---
 title: "Global-Development-Visualization-Project"
 format: pdf
+author: "Claire Chen"
 editor: visual
 editor_options: 
   chunk_output_type: console
