@@ -1,0 +1,391 @@
+---
+title: "Global-Development-Visualization-Project"
+format: pdf
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+# Data Wrangling
+
+```{r}
+library(tidyverse)
+library(patchwork)
+
+df <- read_csv("mcdi_raw_data.csv")
+
+df <- df |>
+  select(
+    comprehension, 
+    production, 
+    caregiver_education, 
+    age, 
+    birth_order) |>
+  na.omit() |>
+  subset(birth_order != "Eighth")
+
+birth_order_levels <- c(
+  "First", 
+  "Second", 
+  "Third", 
+  "Fourth",
+  "Fifth", 
+  "Sixth", 
+  "Seventh"
+  )
+
+caregiver_education_levels <- c(
+  "Primary", 
+  "Some Secondary", 
+  "Secondary", 
+  "Some College", 
+  "College", 
+  "Some Graduate",
+  "Graduate"
+  )
+
+df <- df |>
+  transform(
+    birth_order = factor(birth_order, 
+                         levels = birth_order_levels)
+    ) |>
+  transform(caregiver_education = factor(
+    caregiver_education,
+    levels = caregiver_education_levels)
+    )
+```
+
+# Descriptive Statistics
+
+```{r}
+# number of infants by age
+df |>
+  ggplot(aes(x = age)) +
+  geom_bar() +
+  labs(
+    x = "Age (months)", 
+    y = "Number of Participants") +
+  geom_text(
+    stat = "count", 
+    aes(label = paste0("n = ", after_stat(count))), 
+    vjust = -0.5, 
+    size = 3) +
+  theme_bw()
+
+
+# number of infants by birth order
+bo_sum <- df |>
+  ggplot(aes(x = birth_order)) +
+  geom_bar() +
+  labs(
+    x = "Birth Order", 
+    y = "Number of Participants") +
+  geom_text(
+    stat = "count", 
+    aes(label = paste0("n = ", after_stat(count))), 
+    vjust = -0.5, 
+    size = 3) +
+  theme_bw()
+
+
+# number of infants by caregiver education
+ce_sum <- df |>
+  ggplot(aes(x = caregiver_education)) +
+  geom_bar() +
+  labs(
+    x = "Caregiver Education", 
+    y = "Number of Participants") +
+  geom_text(
+    stat = "count", 
+    aes(label = paste0("n = ", after_stat(count))), 
+    vjust = -0.5, 
+    size = 3) +
+  theme_bw()
+
+bo_sum + ce_sum
+
+# mean production w error bars by age
+df_summary <- df |>
+  group_by(age) |>
+  summarize(
+    mean_production = mean(production, na.rm = TRUE),
+    se_production = sd(production, na.rm = TRUE) / sqrt(n())
+  )
+
+df_summary |>
+  ggplot(
+    aes(
+      x = factor(age), 
+      y = mean_production
+      )) +
+  geom_col() +
+  geom_errorbar(
+    aes(
+      ymin = mean_production - se_production,
+      ymax = mean_production + se_production),
+    width = 0.2) +
+  labs(
+    x = "Age (months)", 
+    y = "Mean Production Score") +
+  theme_bw()
+```
+
+# Comprehension vs. Production
+
+```{r}
+model <- lm(
+  comprehension ~ production, 
+  data = df
+  )
+
+cor(df$comprehension, df$production, use = "complete.obs", method = "pearson")
+
+ggplot(df, 
+       aes(
+         x = comprehension, 
+         y = production
+         )) +
+  geom_bin2d(bins = 50) +
+  geom_smooth(
+    method = "loess", 
+    color = "black", 
+    se = TRUE, 
+    linewidth = 0.6) +
+  scale_fill_viridis_c(option = "inferno", 
+                       direction = -1) +
+  labs(
+    x = "Comprehension Score", 
+    y = "Production Score", 
+    fill = "Count") +
+  theme_bw() +
+  theme(
+    legend.position = c(0.1, 0.8),
+    legend.background = element_rect(fill = alpha('white', 1), color = NA),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)) 
+```
+
+# Vocabulary Growth vs. Age
+
+```{r}
+df_nonzero <- subset(df, production > 0)
+
+model_age <- lm(
+  log(production) ~ age, 
+  data = df_nonzero
+  )
+summary(model_age)
+
+pred <- predict(model_age, se.fit = TRUE)
+
+df_nonzero$fit_log <- pred$fit
+df_nonzero$se_log <- pred$se.fit
+
+df_nonzero$fit <- exp(df_nonzero$fit_log)
+df_nonzero$upper <- exp(df_nonzero$fit_log + 1 * df_nonzero$se_log)
+df_nonzero$lower <- exp(df_nonzero$fit_log - 1 * df_nonzero$se_log)
+
+ggplot(df_nonzero, 
+       aes(
+         x = age,
+         y = production
+         )) +
+  geom_jitter(
+    alpha = 0.3, 
+    color = "gray", 
+    size = 1) +
+  geom_line(
+    aes(y = fit), 
+    color = "black", 
+    linewidth = 0.7) +
+  geom_line(
+    aes(y = upper), 
+    linetype = "dashed", 
+    color = "steelblue", 
+    linewidth = 0.5) +
+  geom_line(
+    aes(y = lower), 
+    linetype = "dashed", 
+    color = "steelblue", 
+    linewidth = 0.5) +
+  labs(
+    x = "Age (months)", 
+    y = "Production Score") +
+  theme_bw()
+
+df_nonzero$resid <- residuals(model_age)
+
+qqplot <- ggplot(df_nonzero, 
+                 aes(sample = resid)) +
+  stat_qq(
+    alpha = 0.5, 
+    color = "gray") +
+  stat_qq_line(color = "red") +
+  labs(
+    x = "Theoretical Quantiles", 
+    y = "Sample Quantiles") +
+  theme_bw()
+
+histogram <- ggplot(df_nonzero, 
+                    aes(x = resid)) +
+  geom_histogram(
+    bins = 20, 
+    fill = "gray", 
+    color = "white") +
+  labs(
+    x = "Residual", 
+    y = "Frequency") +
+  theme_bw()
+
+qqplot + histogram
+```
+
+# Caregiver Education as Predictor
+
+```{r}
+model_ce <- lm(
+  log(production) ~ caregiver_education + age, 
+  data = df_nonzero
+  )
+summary(model_ce)
+
+age_seq <- seq(min(df_nonzero$age), max(df_nonzero$age), length.out = 100)
+
+pred_grid <- expand.grid(
+  age = age_seq,
+  caregiver_education = levels(df_nonzero$caregiver_education)
+)
+
+pred <- predict(
+  model_ce, 
+  newdata = pred_grid, 
+  se.fit = TRUE
+  )
+
+pred_grid$fit_log <- pred$fit
+pred_grid$se_log <- pred$se.fit
+
+pred_grid$fit <- exp(pred_grid$fit_log)
+pred_grid$upper <- exp(pred_grid$fit_log + 1 * pred_grid$se_log)
+pred_grid$lower <- exp(pred_grid$fit_log - 1 * pred_grid$se_log)
+
+ggplot() +
+  geom_jitter(
+    data = df_nonzero, 
+    aes(
+      x = age, 
+      y = production
+      ),
+    alpha = 0.3, 
+    color = "gray", 
+    size = 1) +
+  geom_line(
+    data = pred_grid, 
+    aes(x = age, 
+        y = fit,
+        color = caregiver_education),
+    linewidth = 0.7) +
+  geom_ribbon(
+    data = pred_grid,
+    aes(
+      x = age, 
+      ymin = lower, 
+      ymax = upper,
+      fill = caregiver_education
+      ),
+    alpha = 0.2, 
+    color = NA) +
+  labs(
+    x = "Age (months)", 
+    y = "Production Score",
+    color = "Caregiver Education", 
+    fill = "Caregiver Education") +
+  theme_bw() + 
+  theme(
+    legend.position = c(0.13, 0.78),
+    legend.background = element_rect(fill = alpha('white', 1), color = NA),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+    ) 
+```
+
+# Birth Order as Predictor
+
+```{r}
+model_bo <- lm(
+  log(production) ~ birth_order + age, 
+  data = df_nonzero
+  )
+summary(model_bo)
+
+pred_grid_bo <- expand.grid(
+  age = age_seq,
+  birth_order = levels(df_nonzero$birth_order)
+  )
+
+pred_bo <- predict(
+  model_bo, 
+  newdata = pred_grid_bo, 
+  se.fit = TRUE
+  )
+
+pred_grid_bo$fit_log <- pred_bo$fit
+pred_grid_bo$se_log <- pred_bo$se.fit
+
+pred_grid_bo$fit <- exp(pred_grid_bo$fit_log)
+pred_grid_bo$upper <- exp(pred_grid_bo$fit_log + 1 * pred_grid_bo$se_log)
+pred_grid_bo$lower <- exp(pred_grid_bo$fit_log - 1 * pred_grid_bo$se_log)
+
+ggplot() +
+  geom_jitter(
+    data = df_nonzero, 
+    aes(
+      x = age, 
+      y = production
+      ),
+    alpha = 0.3, 
+    color = "gray", 
+    size = 1) +
+  geom_line(
+    data = pred_grid_bo, 
+    aes(
+      x = age, 
+      y = fit, 
+      color = birth_order
+      ),
+    linewidth = 0.7) +
+  geom_ribbon(
+    data = pred_grid_bo, 
+    aes(
+      x = age, 
+      ymin = lower, 
+      ymax = upper, 
+      fill = birth_order
+      ),
+    alpha = 0.2, 
+    color = NA) +
+  labs(
+    x = "Age (months)", 
+    y = "Production Score", 
+    color = "Birth Order", 
+    fill = "Birth Order") +
+  theme_bw() + 
+  theme(
+    legend.position = c(0.1, 0.78),
+    legend.background = element_rect(fill = alpha('white', 1), color = NA),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+    ) 
+```
+
+# Model Fit Comparisons
+
+```{r}
+model_full <- lm(
+  log(production) ~ birth_order + caregiver_education + age,
+  data = df_nonzero
+  )
+summary(model_full)
+
+AIC(model_age, model_ce, model_bo, model_full)
+```
